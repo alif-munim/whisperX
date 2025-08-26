@@ -282,23 +282,6 @@ class FasterWhisperPipeline(Pipeline):
                 text = text[0]  
             asr_results.append(text)  
   
-        # Reconstruct timeline with both speech and non-speech segments  
-        # speech_idx = 0
-        # any_speech_emitted = False
-        # first_nonspeech_dropped = False
-        # for seg in vad_segments:
-        #     if seg.get('type') == 'non-speech' and include_nonspeech_markers:
-        #         # Always drop the very first non-speech block (usually lead-in noise / mic open)
-        #         if not any_speech_emitted and not first_nonspeech_dropped:
-        #             first_nonspeech_dropped = True
-        #             continue
-        #         segments.append({
-        #             "text": "[UNTRANSCRIBED]",
-        #             "start": round(seg['start'], 3),
-        #             "end": round(seg['end'], 3),
-        #             "type": "non-speech"
-        #         })
-        # Reconstruct timeline with both speech and non-speech segments
         speech_idx = 0
         any_speech_emitted = False
         first_nonspeech_dropped = False
@@ -312,7 +295,7 @@ class FasterWhisperPipeline(Pipeline):
                 dur = float(seg['end']) - float(seg['start'])
                 if (nonspeech_min_duration is None) or (dur >= float(nonspeech_min_duration)):
                     segments.append({
-                        "text": "[UNTRANSCRIBED]",
+                        "text": "[UNINTELLIGIBLE]",
                         "start": round(seg['start'], 3),
                         "end": round(seg['end'], 3),
                         "type": "non-speech"

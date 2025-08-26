@@ -142,15 +142,7 @@ def transcribe_file(
 
         stats["align_s"] = time.perf_counter() - t0
 
-  
-    # ---------- SAVE RAW ----------
-    # if include_nonspeech_markers:
-    #     raw_lines = (seg["text"].strip() for seg in result["segments"])
-    # else:
-    #     raw_lines = (seg["text"].strip() for seg in result["segments"]
-    #                 if seg.get("type") != "non-speech")
-    # raw_text = "\n".join(raw_lines)
-    # out_raw.write_text(raw_text, encoding="utf-8")
+
     # ---------- SAVE RAW ----------
     raw_lines = []
     any_speech_printed = False
