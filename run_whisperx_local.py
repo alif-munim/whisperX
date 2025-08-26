@@ -97,7 +97,8 @@ def transcribe_file(
     num_spk: Optional[int],  
     min_spk: Optional[int],  
     max_spk: Optional[int],  
-    include_nonspeech_markers: bool
+    include_nonspeech_markers: bool,
+    nonspeech_min_duration: Optional[float],
 ) -> Dict[str, float]:  
     """Transcribe (and optionally diarize) a single WAV file."""  
     stats = {  
@@ -119,8 +120,9 @@ def transcribe_file(
         batch_size=batch_size,    
         print_progress=True,    
         language="en",  
+        chunk_size=30, 
         include_nonspeech_markers=include_nonspeech_markers,
-        chunk_size=30,  # Add this parameter  
+        nonspeech_min_duration=nonspeech_min_duration,
     )    
     stats["transcribe_s"] = time.perf_counter() - t0  
   
@@ -142,13 +144,33 @@ def transcribe_file(
 
   
     # ---------- SAVE RAW ----------
-    if include_nonspeech_markers:
-        raw_lines = (seg["text"].strip() for seg in result["segments"])
-    else:
-        raw_lines = (seg["text"].strip() for seg in result["segments"]
-                    if seg.get("type") != "non-speech")
+    # if include_nonspeech_markers:
+    #     raw_lines = (seg["text"].strip() for seg in result["segments"])
+    # else:
+    #     raw_lines = (seg["text"].strip() for seg in result["segments"]
+    #                 if seg.get("type") != "non-speech")
+    # raw_text = "\n".join(raw_lines)
+    # out_raw.write_text(raw_text, encoding="utf-8")
+    # ---------- SAVE RAW ----------
+    raw_lines = []
+    any_speech_printed = False
+    first_nonspeech_dropped = False
+    for seg in result["segments"]:
+        seg_type = seg.get("type")
+        if include_nonspeech_markers and seg_type == "non-speech":
+            if not any_speech_printed and not first_nonspeech_dropped:
+                first_nonspeech_dropped = True
+                continue
+            dur = float(seg["end"]) - float(seg["start"])
+            if (nonspeech_min_duration is None) or (dur >= float(nonspeech_min_duration)):
+                raw_lines.append(seg["text"].strip())
+            continue
+        # speech or (non-speech but markers disabled)
+        if seg_type != "non-speech":
+            raw_lines.append(seg["text"].strip())
+            any_speech_printed = True
+        # else: markers disabled — skip non-speech
     raw_text = "\n".join(raw_lines)
-    out_raw.write_text(raw_text, encoding="utf-8")
   
     # ---------- DIARIZATION ----------  
     if diar_model and out_diar:  
@@ -164,16 +186,50 @@ def transcribe_file(
         stats["diarize_s"] = time.perf_counter() - t0  
   
         # Build diarized text (match CLI style: no prefix for non-speech; avoid [UNK])
+        # lines = []
+        # last_spk = None
+        # # for seg in result["segments"]:
+        # #     if seg.get("type") == "non-speech":
+        # #         if include_nonspeech_markers:
+        # #             lines.append(seg["text"].strip())          # keep [UNTRANSCRIBED]
+        # for seg in result["segments"]:
+        #     if seg.get("type") == "non-speech":
+        #         if include_nonspeech_markers:
+        #             dur = seg["end"] - seg["start"]
+        #             if nonspeech_min_duration is None or dur >= nonspeech_min_duration:
+        #                 lines.append(seg["text"].strip())
+        #         continue                                       # else skip it
+        #     spk = seg.get("speaker") or last_spk or "SPEAKER_00"
+        #     last_spk = spk
+        #     lines.append(f"[{spk}]: {seg['text'].strip()}")
+        # Build diarized text (no prefix for non-speech; drop first non-speech; apply duration threshold)
         lines = []
         last_spk = None
+        any_speech_printed = False
+        first_nonspeech_dropped = False
+
+        # Restore missing 'type' for placeholders that may have lost it during diarization
+        for _seg in result["segments"]:
+            if _seg.get("text", "").strip() == "[UNTRANSCRIBED]" and _seg.get("type") is None:
+                _seg["type"] = "non-speech"
+
         for seg in result["segments"]:
             if seg.get("type") == "non-speech":
+                # never print the very first non-speech
+                if not any_speech_printed and not first_nonspeech_dropped:
+                    first_nonspeech_dropped = True
+                    continue
                 if include_nonspeech_markers:
-                    lines.append(seg["text"].strip())          # keep [UNTRANSCRIBED]
-                continue                                       # else skip it
+                    dur = float(seg["end"]) - float(seg["start"])
+                    if (nonspeech_min_duration is None) or (dur >= float(nonspeech_min_duration)):
+                        lines.append(seg["text"].strip())  # just the marker, no speaker
+                continue
+
+            # speech
             spk = seg.get("speaker") or last_spk or "SPEAKER_00"
             last_spk = spk
             lines.append(f"[{spk}]: {seg['text'].strip()}")
+            any_speech_printed = True
         diar_text = "\n".join(lines)
         out_diar.write_text(diar_text, encoding="utf-8")
   
@@ -196,7 +252,8 @@ def transcribe_path(
     vad_onset: float,
     vad_offset: float,
     chunk_size: int,
-    include_nonspeech_markers: bool
+    include_nonspeech_markers: bool,
+    nonspeech_min_duration: Optional[float],
 ):  
     """Transcribe one file or every *.wav under a directory."""  
     out_raw_dir   = out_root / "raw"  
@@ -232,6 +289,7 @@ def transcribe_path(
             min_spk        = min_spk,  
             max_spk        = max_spk,  
             include_nonspeech_markers=include_nonspeech_markers,
+            nonspeech_min_duration=nonspeech_min_duration,
         )  
         logging.info(  
             "   audio %.1fs | ASR %.1fs | align %.1fs | diar %.1fs",  
@@ -288,6 +346,13 @@ def main():
         help="Omit [UNTRANSCRIBED] lines in outputs (default)."
     )
     p.set_defaults(include_nonspeech_markers=False)
+    p.add_argument(
+        "--nonspeech-min-duration",
+        type=float,
+        default=0.75,
+        help="Only output a non-speech marker if the gap is at least this many seconds. "
+            "Use 0 to allow all gaps."
+    )
 
   
     spk = p.add_argument_group("speaker options (ignored if --no-diarize)")  
@@ -320,6 +385,7 @@ def main():
         vad_offset=args.vad_offset,
         chunk_size=args.chunk_size,
         include_nonspeech_markers=args.include_nonspeech_markers,
+        nonspeech_min_duration=args.nonspeech_min_duration,
     )
 
   

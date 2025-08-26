@@ -197,7 +197,8 @@ class FasterWhisperPipeline(Pipeline):
         print_progress=False,
         combined_progress=False,
         verbose=False,
-        include_nonspeech_markers=False,  # New parameter  
+        include_nonspeech_markers=False,
+        nonspeech_min_duration: Optional[float] = None, 
     ) -> TranscriptionResult:
         if isinstance(audio, str):
             audio = load_audio(audio)
@@ -282,29 +283,54 @@ class FasterWhisperPipeline(Pipeline):
             asr_results.append(text)  
   
         # Reconstruct timeline with both speech and non-speech segments  
-        speech_idx = 0  
-        for seg in vad_segments:  
-            if seg.get('type') == 'non-speech' and include_nonspeech_markers:  
-                # Add non-speech marker  
-                segments.append({  
-                    "text": "[UNTRANSCRIBED]",  
-                    "start": round(seg['start'], 3),  
-                    "end": round(seg['end'], 3),  
-                    "type": "non-speech"  
-                })  
-            else:  
-                # Add speech segment with transcription  
-                if speech_idx < len(asr_results):  
-                    text = asr_results[speech_idx]  
-                    if verbose:  
-                        print(f"Transcript: [{round(seg['start'], 3)} --> {round(seg['end'], 3)}] {text}")  
-                    segments.append({  
-                        "text": text,  
-                        "start": round(seg['start'], 3),  
-                        "end": round(seg['end'], 3),  
-                        "type": "speech"  
-                    })  
-                    speech_idx += 1  
+        # speech_idx = 0
+        # any_speech_emitted = False
+        # first_nonspeech_dropped = False
+        # for seg in vad_segments:
+        #     if seg.get('type') == 'non-speech' and include_nonspeech_markers:
+        #         # Always drop the very first non-speech block (usually lead-in noise / mic open)
+        #         if not any_speech_emitted and not first_nonspeech_dropped:
+        #             first_nonspeech_dropped = True
+        #             continue
+        #         segments.append({
+        #             "text": "[UNTRANSCRIBED]",
+        #             "start": round(seg['start'], 3),
+        #             "end": round(seg['end'], 3),
+        #             "type": "non-speech"
+        #         })
+        # Reconstruct timeline with both speech and non-speech segments
+        speech_idx = 0
+        any_speech_emitted = False
+        first_nonspeech_dropped = False
+        for seg in vad_segments:
+            if seg.get('type') == 'non-speech' and include_nonspeech_markers:
+                # Always drop the very first non-speech (lead-in / mic open)
+                if not any_speech_emitted and not first_nonspeech_dropped:
+                    first_nonspeech_dropped = True
+                    continue
+                # Enforce minimum duration
+                dur = float(seg['end']) - float(seg['start'])
+                if (nonspeech_min_duration is None) or (dur >= float(nonspeech_min_duration)):
+                    segments.append({
+                        "text": "[UNTRANSCRIBED]",
+                        "start": round(seg['start'], 3),
+                        "end": round(seg['end'], 3),
+                        "type": "non-speech"
+                    })
+                continue
+            else:
+                if speech_idx < len(asr_results):
+                    text = asr_results[speech_idx]
+                    if verbose:
+                        print(f"Transcript: [{round(seg['start'], 3)} --> {round(seg['end'], 3)}] {text}")
+                    segments.append({
+                        "text": text,
+                        "start": round(seg['start'], 3),
+                        "end": round(seg['end'], 3),
+                        "type": "speech"
+                    })
+                    speech_idx += 1
+                    any_speech_emitted = True
     
         # revert the tokenizer if multilingual inference is enabled  
         if self.preset_language is None:  

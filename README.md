@@ -3,8 +3,11 @@
 ### First Time Setup
 After pulling the repository, you have to set up the `uv` env for whisperX.
 ```
+# (optional) remove old venv
+rm -rf .venv
+
 # make clean venv with uv
-uv venv
+uv venv --python $(command -v python3)
 source .venv/bin/activate
 
 # install all dev + extras
@@ -50,7 +53,7 @@ usage: run_whisperx_local.py [-h] -i INPUT [-o OUTPUT] [--vad_method {pyannote,s
 
 Example inputs.
 ```
-python run_whisperx_local.py --input ./wav_audio/40-Post-opfollowupforsurgery-onlypatient-SurgicalOnc-Script-Claude.wav --output test_single
+python run_whisperx_local.py --input ./wav_audio/40-Post-opfollowupforsurgery-onlypatient-SurgicalOnc-Script-Claude.wav --output test_single --include-nonspeech-markers --nonspeech-min-duration 0.8
 python run_whisperx_local.py --input ./wav_audio --output local_run --min_speakers 2 --max_speakers 4
 ```
 
